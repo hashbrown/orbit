@@ -21,42 +21,49 @@ class OrbitalBody:
         self.trajectory = [self.position.copy()]
         self.active = True
         self.current_force = 0.0
+        
+        # Calculate initial acceleration
+        self.acceleration = self.calculate_acceleration(self.position)
     
-    def calculate_gravitational_force(self) -> tuple[np.ndarray, float]:
+    def calculate_acceleration(self, pos: np.ndarray) -> np.ndarray:
         """
-        Calculate the gravitational force vector using Newton's law of universal gravitation.
+        Calculate acceleration at a given position using Newton's law of gravitation.
         
+        Args:
+            pos: Position vector [x, y] in meters
+            
         Returns:
-            Tuple of (force vector [Fx, Fy] in Newtons, force magnitude in Newtons)
+            Acceleration vector [ax, ay] in m/s²
         """
-        # Calculate distance to Earth's center
-        r = np.linalg.norm(self.position)
-        
-        # Calculate force magnitude using F = G(M*m)/r²
-        force_magnitude = G * EARTH_MASS * self.mass / (r ** 2)
-        
-        # Calculate force vector (pointing toward Earth's center)
-        force_vector = -force_magnitude * self.position / r
-        
-        return force_vector, force_magnitude
+        r = np.linalg.norm(pos)
+        if r == 0:
+            return np.zeros_like(pos)
+        return -G * EARTH_MASS * pos / (r ** 3)
     
     def update(self, dt: float):
         """
-        Update the position and velocity of the body using Euler integration.
+        Update the position and velocity of the body using Velocity Verlet integration.
         
         Args:
             dt: Time step in seconds
         """
         if not self.active:
             return
-
-        # Calculate acceleration (gravitational force / mass)
-        force_vector, self.current_force = self.calculate_gravitational_force()
-        acceleration = force_vector / self.mass
         
-        # Euler integration
-        self.velocity += acceleration * dt
+        # Half-step velocity using current acceleration
+        self.velocity += 0.5 * self.acceleration * dt
+        
+        # Full-step position
         self.position += self.velocity * dt
+        
+        # Calculate new acceleration
+        new_acceleration = self.calculate_acceleration(self.position)
+        
+        # Complete velocity step using new acceleration
+        self.velocity += 0.5 * new_acceleration * dt
+        
+        # Update acceleration
+        self.acceleration = new_acceleration
         
         # Store position for trajectory
         self.trajectory.append(self.position.copy())
@@ -64,8 +71,7 @@ class OrbitalBody:
         # Limit trajectory length
         if len(self.trajectory) > 1000:
             self.trajectory.pop(0)
-    
-    def calculate_acceleration(self, pos: np.ndarray) -> np.ndarray:
-        """Calculate acceleration at a given position."""
-        r = np.linalg.norm(pos)
-        return -G * EARTH_MASS * pos / (r ** 3) 
+        
+        # Update current force for display purposes
+        r = np.linalg.norm(self.position)
+        self.current_force = G * EARTH_MASS * self.mass / (r ** 2) 

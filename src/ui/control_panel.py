@@ -3,6 +3,7 @@
 import pygame
 from typing import Tuple, Dict, Any, Callable
 from pygame.rect import Rect
+from src.physics.constants import TIME_SCALE
 
 class Button:
     """Simple button class for UI controls."""
@@ -13,7 +14,8 @@ class Button:
                 callback: Callable[[], None], 
                 color: Tuple[int, int, int] = (100, 100, 200),
                 hover_color: Tuple[int, int, int] = (150, 150, 250),
-                text_color: Tuple[int, int, int] = (255, 255, 255)):
+                text_color: Tuple[int, int, int] = (255, 255, 255),
+                is_toggle: bool = False):
         """
         Initialize a button.
         
@@ -24,18 +26,28 @@ class Button:
             color: Button color
             hover_color: Button color when hovered
             text_color: Text color
+            is_toggle: Whether this is a toggle button
         """
         self.rect = rect
         self.text = text
         self.callback = callback
+        self.base_color = color
         self.color = color
         self.hover_color = hover_color
         self.text_color = text_color
         self.hovered = False
+        self.is_toggle = is_toggle
+        self.toggled = False
         self.font = pygame.font.SysFont("Arial", 16)
     
     def draw(self, screen: pygame.Surface):
         """Draw the button."""
+        if self.is_toggle:
+            if self.toggled:
+                self.color = (50, 50, 100)  # Darker color when toggled off
+            else:
+                self.color = self.base_color
+        
         color = self.hover_color if self.hovered else self.color
         pygame.draw.rect(screen, color, self.rect, border_radius=5)
         
@@ -86,8 +98,14 @@ class ControlPanel:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.buttons = []
-        self.time_scales = [1.0, 2.0, 5.0, 10.0]
-        self.current_time_scale_index = 0
+        
+        # Time scales: 24h in 4min, 2min, 1min, 30sec
+        self.time_scales = [TIME_SCALE/4, TIME_SCALE/2, TIME_SCALE, TIME_SCALE*2]
+        self.current_time_scale_index = 2  # Default to 24h in 1min
+        
+        # Visibility state
+        self.show_moon = True
+        self.show_iss = True
         
         # State
         self.paused = False
@@ -116,7 +134,7 @@ class ControlPanel:
         x += button_width + button_spacing
         self.buttons.append(Button(
             Rect(x, y, button_width, button_height),
-            f"Speed: {self.time_scales[self.current_time_scale_index]}x",
+            f"Speed: {self.time_scales[self.current_time_scale_index]/3600:.1f}h/s",
             self._cycle_time_scale
         ))
         
@@ -127,6 +145,26 @@ class ControlPanel:
             "Reset",
             self._reset_simulation
         ))
+        
+        # Toggle buttons (on the right side)
+        x = self.screen_width - 2 * (button_width + button_spacing)
+        
+        # Moon toggle
+        self.buttons.append(Button(
+            Rect(x, y, button_width, button_height),
+            "Hide Moon",
+            self._toggle_moon,
+            is_toggle=True
+        ))
+        
+        # ISS toggle
+        x += button_width + button_spacing
+        self.buttons.append(Button(
+            Rect(x, y, button_width, button_height),
+            "Hide ISS",
+            self._toggle_iss,
+            is_toggle=True
+        ))
     
     def _toggle_pause(self):
         """Toggle the pause state."""
@@ -136,7 +174,7 @@ class ControlPanel:
     def _cycle_time_scale(self):
         """Cycle through time scales."""
         self.current_time_scale_index = (self.current_time_scale_index + 1) % len(self.time_scales)
-        self.buttons[1].text = f"Speed: {self.time_scales[self.current_time_scale_index]}x"
+        self.buttons[1].text = f"Speed: {self.time_scales[self.current_time_scale_index]/3600:.1f}h/s"
     
     def _reset_simulation(self):
         """Reset the simulation (callback will be set by main.py)"""
@@ -145,6 +183,24 @@ class ControlPanel:
     def set_reset_callback(self, callback: Callable[[], None]):
         """Set the callback for the reset button."""
         self.buttons[2].callback = callback
+    
+    def _toggle_moon(self):
+        """Toggle Moon visibility."""
+        self.show_moon = not self.show_moon
+        button = self.buttons[3]  # Moon toggle button
+        button.toggled = not self.show_moon
+        button.text = "Show Moon" if button.toggled else "Hide Moon"
+    
+    def _toggle_iss(self):
+        """Toggle ISS visibility."""
+        self.show_iss = not self.show_iss
+        button = self.buttons[4]  # ISS toggle button
+        button.toggled = not self.show_iss
+        button.text = "Show ISS" if button.toggled else "Hide ISS"
+    
+    def get_visibility(self) -> tuple[bool, bool]:
+        """Get visibility state of Moon and ISS."""
+        return self.show_moon, self.show_iss
     
     def draw(self, screen: pygame.Surface):
         """Draw the control panel."""
@@ -167,4 +223,19 @@ class ControlPanel:
         """Get the current time scale."""
         if self.paused:
             return 0.0
-        return self.time_scales[self.current_time_scale_index] 
+        return self.time_scales[self.current_time_scale_index]
+
+    def set_time_scale(self, time_scale: float):
+        """Set the time scale to the closest available value."""
+        # Find the closest time scale
+        closest_index = 0
+        min_diff = abs(self.time_scales[0] - time_scale)
+        
+        for i, ts in enumerate(self.time_scales):
+            diff = abs(ts - time_scale)
+            if diff < min_diff:
+                min_diff = diff
+                closest_index = i
+        
+        self.current_time_scale_index = closest_index
+        self.buttons[1].text = f"Speed: {self.time_scales[self.current_time_scale_index]/3600:.1f}h/s" 

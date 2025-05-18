@@ -3,60 +3,31 @@
 import sys
 import pygame
 import numpy as np
-from src.physics.constants import EARTH_RADIUS, G, EARTH_MASS
+from src.physics.constants import (
+    EARTH_RADIUS, G, EARTH_MASS, MOON_MASS, MOON_ORBITAL_RADIUS,
+    ISS_MASS, ISS_ORBITAL_RADIUS, TIME_SCALE, SIMULATION_DURATION
+)
 from src.physics.orbital_mechanics import OrbitalBody
 from src.visualization.renderer import Renderer
 from src.ui.control_panel import ControlPanel
 
-def calculate_circular_orbit_velocity(radius: float) -> float:
+def calculate_circular_orbit_velocity(radius: float, central_mass: float = EARTH_MASS) -> float:
     """Calculate velocity needed for circular orbit at given radius."""
-    return np.sqrt(G * EARTH_MASS / radius)
+    return np.sqrt(G * central_mass / radius)
 
-def create_circular_orbit(altitude: float = 500_000) -> OrbitalBody:
-    """
-    Create an orbital body in a circular orbit at the specified altitude.
-    
-    Args:
-        altitude: Altitude above Earth's surface in meters (default: 500 km)
-        
-    Returns:
-        OrbitalBody instance
-    """
-    radius = EARTH_RADIUS + altitude
-    velocity = calculate_circular_orbit_velocity(radius)
-    
-    # Position at the 3 o'clock position (right side of Earth)
-    position = np.array([radius, 0.0])
-    
-    # Velocity vector perpendicular to position (for circular orbit)
+def create_moon() -> OrbitalBody:
+    """Create the Moon in its orbit around Earth."""
+    velocity = calculate_circular_orbit_velocity(MOON_ORBITAL_RADIUS)
+    position = np.array([MOON_ORBITAL_RADIUS, 0.0])
     velocity_vector = np.array([0.0, velocity])
-    
-    return OrbitalBody(position, velocity_vector)
+    return OrbitalBody(position, velocity_vector, mass=MOON_MASS)
 
-def create_elliptical_orbit(perigee: float = 500_000, apogee: float = 2_000_000) -> OrbitalBody:
-    """
-    Create an orbital body in an elliptical orbit with the specified perigee and apogee.
-    
-    Args:
-        perigee: Closest approach to Earth's surface in meters (default: 500 km)
-        apogee: Furthest distance from Earth's surface in meters (default: 2000 km)
-        
-    Returns:
-        OrbitalBody instance
-    """
-    # Calculate semi-major axis
-    r_p = EARTH_RADIUS + perigee  # Perigee radius
-    r_a = EARTH_RADIUS + apogee   # Apogee radius
-    semi_major_axis = (r_p + r_a) / 2
-    
-    # Start at perigee (closest approach)
-    position = np.array([r_p, 0.0])
-    
-    # Calculate velocity at perigee (vis-viva equation)
-    velocity = np.sqrt(G * EARTH_MASS * (2/r_p - 1/semi_major_axis))
+def create_iss() -> OrbitalBody:
+    """Create the ISS in its orbit around Earth."""
+    velocity = calculate_circular_orbit_velocity(ISS_ORBITAL_RADIUS)
+    position = np.array([ISS_ORBITAL_RADIUS, 0.0])
     velocity_vector = np.array([0.0, velocity])
-    
-    return OrbitalBody(position, velocity_vector)
+    return OrbitalBody(position, velocity_vector, mass=ISS_MASS)
 
 def main():
     """Main function to run the simulation."""
@@ -69,23 +40,24 @@ def main():
     # Create control panel
     control_panel = ControlPanel(renderer.width, renderer.height)
     
-    # Create initial satellites
-    satellites = [create_circular_orbit()]
+    # Create Moon and ISS
+    celestial_bodies = [create_moon(), create_iss()]
     
     # Set reset callback
     def reset_simulation():
-        satellites.clear()
-        satellites.append(create_circular_orbit())
+        celestial_bodies.clear()
+        celestial_bodies.extend([create_moon(), create_iss()])
     
     control_panel.set_reset_callback(reset_simulation)
     
     # Simulation timing
     clock = pygame.time.Clock()
-    dt = 1.0  # Base time step in seconds
-    VELOCITY_INCREMENT = 100.0 # m/s per key press for velocity adjustment
+    dt = 0.1  # Base time step in seconds (reduced for stability)
+    control_panel.set_time_scale(TIME_SCALE)  # 24 hours in 1 minute
     
     # Main loop
     running = True
+    simulation_time = 0.0  # Track total simulation time
     while running:
         # Process events
         for event in pygame.event.get():
@@ -94,25 +66,6 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif event.key == pygame.K_c:
-                    # Add circular orbit
-                    if len(satellites) < 5:  # Limit to 5 satellites
-                        satellites.append(create_circular_orbit(altitude=np.random.uniform(300_000, 1_000_000)))
-                elif event.key == pygame.K_e:
-                    # Add elliptical orbit
-                    if len(satellites) < 5:  # Limit to 5 satellites
-                        satellites.append(create_elliptical_orbit())
-                
-                # Velocity controls for the first satellite
-                elif satellites: # Ensure there is at least one satellite
-                    if event.key == pygame.K_UP:
-                        satellites[0].velocity[1] += VELOCITY_INCREMENT
-                    elif event.key == pygame.K_DOWN:
-                        satellites[0].velocity[1] -= VELOCITY_INCREMENT
-                    elif event.key == pygame.K_LEFT:
-                        satellites[0].velocity[0] -= VELOCITY_INCREMENT
-                    elif event.key == pygame.K_RIGHT:
-                        satellites[0].velocity[0] += VELOCITY_INCREMENT
             
             # Handle UI events
             control_panel.handle_event(event)
@@ -127,11 +80,28 @@ def main():
         # Update physics (skip if paused)
         if time_scale > 0:
             scaled_dt = dt * time_scale
-            for satellite in satellites:
-                satellite.update(scaled_dt)
+            simulation_time += scaled_dt
+            
+            # Stop after 24 hours of simulation time
+            if simulation_time >= SIMULATION_DURATION:
+                time_scale = 0
+                control_panel.set_time_scale(0)  # Pause the simulation
+            
+            for body in celestial_bodies:
+                body.update(scaled_dt)
+        
+        # Get visibility state
+        show_moon, show_iss = control_panel.get_visibility()
+        
+        # Create list of visible bodies
+        visible_bodies = []
+        if show_moon:
+            visible_bodies.append(celestial_bodies[0])
+        if show_iss:
+            visible_bodies.append(celestial_bodies[1])
         
         # Render everything
-        renderer.render(satellites, time_scale)
+        renderer.render(visible_bodies, time_scale)
         control_panel.draw(renderer.screen)
         
         # Update display
