@@ -3,195 +3,146 @@
 import sys
 import pygame
 import numpy as np
-from physics.constants import EARTH_RADIUS, SCALE_FACTOR, TIME_STEP
-from physics.orbital_mechanics import OrbitalBody
+from src.physics.constants import EARTH_RADIUS, G, EARTH_MASS
+from src.physics.orbital_mechanics import OrbitalBody
+from src.visualization.renderer import Renderer
+from src.ui.control_panel import ControlPanel
 
-# Initialize Pygame
-pygame.init()
+def calculate_circular_orbit_velocity(radius: float) -> float:
+    """Calculate velocity needed for circular orbit at given radius."""
+    return np.sqrt(G * EARTH_MASS / radius)
 
-# Set up the display
-WINDOW_WIDTH = 1200
-WINDOW_HEIGHT = 800
-screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
-pygame.display.set_caption("Orbital Simulation")
-
-# Colors
-BLACK = (0, 0, 0)
-BLUE = (0, 0, 255)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-GRAY = (128, 128, 128)
-
-# Simulation controls
-MAX_TRAJECTORY_POINTS = 1000
-TRAJECTORY_DISPLAY_FRACTION = 0.15  # Show last 15% of trajectory
-BASE_VELOCITY_CHANGE = 50.0  # Base m/s per key press
-ACCELERATION_FACTOR = 1.2  # How quickly the velocity change increases
-MAX_VELOCITY_CHANGE = 2000.0  # Maximum m/s per frame
-TIME_SCALE_CHANGE = 0.5  # Time scale change per key press
-MIN_TIME_SCALE = 0.1
-MAX_TIME_SCALE = 10.0
-
-def screen_coords(position):
-    """Convert simulation coordinates to screen coordinates."""
-    return (
-        int(WINDOW_WIDTH / 2 + position[0] * SCALE_FACTOR),
-        int(WINDOW_HEIGHT / 2 - position[1] * SCALE_FACTOR)  # Flip y-axis
-    )
-
-def draw_earth():
-    """Draw Earth at the center of the screen."""
-    center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)
-    radius = int(EARTH_RADIUS * SCALE_FACTOR)
-    pygame.draw.circle(screen, BLUE, center, radius)
-
-def draw_satellite(position):
-    """Draw a diamond-shaped satellite at the given position."""
-    x, y = screen_coords(position)
-    size = 8  # Size of the diamond
+def create_circular_orbit(altitude: float = 500_000) -> OrbitalBody:
+    """
+    Create an orbital body in a circular orbit at the specified altitude.
     
-    # Define diamond points (clockwise from top)
-    points = [
-        (x, y - size),  # Top
-        (x + size, y),  # Right
-        (x, y + size),  # Bottom
-        (x - size, y)   # Left
-    ]
-    
-    # Draw diamond
-    pygame.draw.polygon(screen, RED, points)
-
-def draw_trajectory(trajectory):
-    """Draw the trajectory of the satellite with fade effect."""
-    if len(trajectory) < 2:
-        return
-    
-    # Calculate how many points to show (15% of total)
-    display_points = max(2, int(len(trajectory) * TRAJECTORY_DISPLAY_FRACTION))
-    visible_trajectory = trajectory[-display_points:]
-    
-    # Convert trajectory points to screen coordinates
-    points = [screen_coords(pos) for pos in visible_trajectory]
-    
-    # Draw fading trajectory segments
-    for i in range(len(points) - 1):
-        # Calculate alpha value (0-255) based on position in trajectory
-        alpha = int(255 * (i / (len(points) - 1)))
-        color = (WHITE[0], WHITE[1], WHITE[2], alpha)
+    Args:
+        altitude: Altitude above Earth's surface in meters (default: 500 km)
         
-        # Create a surface for this line segment
-        line_surface = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-        pygame.draw.line(line_surface, color, points[i], points[i + 1], 1)
-        screen.blit(line_surface, (0, 0))
+    Returns:
+        OrbitalBody instance
+    """
+    radius = EARTH_RADIUS + altitude
+    velocity = calculate_circular_orbit_velocity(radius)
+    
+    # Position at the 3 o'clock position (right side of Earth)
+    position = np.array([radius, 0.0])
+    
+    # Velocity vector perpendicular to position (for circular orbit)
+    velocity_vector = np.array([0.0, velocity])
+    
+    return OrbitalBody(position, velocity_vector)
 
-def draw_info(time_scale, velocity, velocity_change):
-    """Draw simulation information."""
-    font = pygame.font.Font(None, 36)
+def create_elliptical_orbit(perigee: float = 500_000, apogee: float = 2_000_000) -> OrbitalBody:
+    """
+    Create an orbital body in an elliptical orbit with the specified perigee and apogee.
     
-    # Display time scale
-    time_text = font.render(f"Time Scale: {time_scale:.1f}x", True, WHITE)
-    screen.blit(time_text, (10, 10))
+    Args:
+        perigee: Closest approach to Earth's surface in meters (default: 500 km)
+        apogee: Furthest distance from Earth's surface in meters (default: 2000 km)
+        
+    Returns:
+        OrbitalBody instance
+    """
+    # Calculate semi-major axis
+    r_p = EARTH_RADIUS + perigee  # Perigee radius
+    r_a = EARTH_RADIUS + apogee   # Apogee radius
+    semi_major_axis = (r_p + r_a) / 2
     
-    # Display velocity
-    vel_magnitude = np.linalg.norm(velocity)
-    vel_text = font.render(f"Velocity: {vel_magnitude/1000:.1f} km/s", True, WHITE)
-    screen.blit(vel_text, (10, 50))
+    # Start at perigee (closest approach)
+    position = np.array([r_p, 0.0])
     
-    # Display velocity change rate
-    rate_text = font.render(f"Acceleration: {velocity_change:.0f} m/s", True, WHITE)
-    screen.blit(rate_text, (10, 90))
+    # Calculate velocity at perigee (vis-viva equation)
+    velocity = np.sqrt(G * EARTH_MASS * (2/r_p - 1/semi_major_axis))
+    velocity_vector = np.array([0.0, velocity])
     
-    # Display controls
-    controls = [
-        "Controls:",
-        "Arrow Keys: Adjust velocity (hold to accelerate)",
-        "+/-: Adjust time scale",
-        "ESC: Quit"
-    ]
-    
-    for i, text in enumerate(controls):
-        control_text = font.render(text, True, GRAY)
-        screen.blit(control_text, (10, 140 + i * 30))
+    return OrbitalBody(position, velocity_vector)
 
 def main():
-    """Main game loop."""
+    """Main function to run the simulation."""
+    # Initialize pygame
+    pygame.init()
+    
+    # Create renderer
+    renderer = Renderer()
+    
+    # Create control panel
+    control_panel = ControlPanel(renderer.width, renderer.height)
+    
+    # Create initial satellites
+    satellites = [create_circular_orbit()]
+    
+    # Set reset callback
+    def reset_simulation():
+        satellites.clear()
+        satellites.append(create_circular_orbit())
+    
+    control_panel.set_reset_callback(reset_simulation)
+    
+    # Simulation timing
     clock = pygame.time.Clock()
+    dt = 1.0  # Base time step in seconds
+    VELOCITY_INCREMENT = 100.0 # m/s per key press for velocity adjustment
     
-    # Initialize orbital body (starting from 10,000 km above Earth's surface)
-    initial_position = np.array([0, EARTH_RADIUS + 10_000_000])  # 10,000 km above Earth
-    initial_velocity = np.array([7800.0, 0.0])  # Approximate orbital velocity in m/s
-    satellite = OrbitalBody(initial_position, initial_velocity)
-    
-    # Simulation control variables
-    time_scale = 1.0
-    velocity_change = BASE_VELOCITY_CHANGE
-    last_key_state = pygame.key.get_pressed()
-    
-    while True:
-        # Event handling
+    # Main loop
+    running = True
+    while running:
+        # Process events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    pygame.quit()
-                    sys.exit()
-                elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
-                    time_scale = min(MAX_TIME_SCALE, time_scale + TIME_SCALE_CHANGE)
-                elif event.key == pygame.K_MINUS:
-                    time_scale = max(MIN_TIME_SCALE, time_scale - TIME_SCALE_CHANGE)
+                    running = False
+                elif event.key == pygame.K_c:
+                    # Add circular orbit
+                    if len(satellites) < 5:  # Limit to 5 satellites
+                        satellites.append(create_circular_orbit(altitude=np.random.uniform(300_000, 1_000_000)))
+                elif event.key == pygame.K_e:
+                    # Add elliptical orbit
+                    if len(satellites) < 5:  # Limit to 5 satellites
+                        satellites.append(create_elliptical_orbit())
+                
+                # Velocity controls for the first satellite
+                elif satellites: # Ensure there is at least one satellite
+                    if event.key == pygame.K_UP:
+                        satellites[0].velocity[1] += VELOCITY_INCREMENT
+                    elif event.key == pygame.K_DOWN:
+                        satellites[0].velocity[1] -= VELOCITY_INCREMENT
+                    elif event.key == pygame.K_LEFT:
+                        satellites[0].velocity[0] -= VELOCITY_INCREMENT
+                    elif event.key == pygame.K_RIGHT:
+                        satellites[0].velocity[0] += VELOCITY_INCREMENT
+            
+            # Handle UI events
+            control_panel.handle_event(event)
         
-        # Handle continuous key presses for velocity adjustment
-        keys = pygame.key.get_pressed()
+        # Update mouse position for UI hover effects
+        mouse_pos = pygame.mouse.get_pos()
+        control_panel.update(mouse_pos)
         
-        # Check if any arrow key is being held
-        arrow_keys_held = any(keys[key] for key in [pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT])
+        # Get time scale from control panel
+        time_scale = control_panel.get_time_scale()
         
-        # Update velocity change based on key state
-        if arrow_keys_held:
-            # Increase velocity change if keys are held
-            velocity_change = min(velocity_change * ACCELERATION_FACTOR, MAX_VELOCITY_CHANGE)
-        else:
-            # Reset velocity change when keys are released
-            velocity_change = BASE_VELOCITY_CHANGE
+        # Update physics (skip if paused)
+        if time_scale > 0:
+            scaled_dt = dt * time_scale
+            for satellite in satellites:
+                satellite.update(scaled_dt)
         
-        # Apply velocity changes
-        if keys[pygame.K_UP]:
-            satellite.velocity[1] += velocity_change
-        if keys[pygame.K_DOWN]:
-            satellite.velocity[1] -= velocity_change
-        if keys[pygame.K_RIGHT]:
-            satellite.velocity[0] += velocity_change
-        if keys[pygame.K_LEFT]:
-            satellite.velocity[0] -= velocity_change
-        
-        # Store current key state
-        last_key_state = keys
-        
-        # Update physics with time scaling
-        satellite.update(TIME_STEP * time_scale)
-        
-        # Clear screen
-        screen.fill(BLACK)
-        
-        # Draw Earth
-        draw_earth()
-        
-        # Draw trajectory
-        draw_trajectory(satellite.trajectory)
-        
-        # Draw satellite
-        draw_satellite(satellite.position)
-        
-        # Draw information
-        draw_info(time_scale, satellite.velocity, velocity_change)
+        # Render everything
+        renderer.render(satellites, time_scale)
+        control_panel.draw(renderer.screen)
         
         # Update display
         pygame.display.flip()
         
         # Cap at 60 FPS
         clock.tick(60)
+    
+    # Clean up
+    pygame.quit()
+    sys.exit()
 
 if __name__ == "__main__":
     main() 
