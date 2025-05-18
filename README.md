@@ -2,6 +2,8 @@
 
 A real-time simulation of the Earth-Moon-International Space Station (ISS) system using actual orbital parameters and Newtonian physics. The simulation provides an interactive visualization of these celestial bodies' orbits with proper scaling and time controls.
 
+![Orbital Simulation Screenshot](orbital_app.png)
+
 ## Features
 
 - Accurate orbital mechanics using Velocity Verlet integration
